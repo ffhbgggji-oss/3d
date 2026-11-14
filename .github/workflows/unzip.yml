@@ -104,6 +104,27 @@ jobs:
           printf '4.2.1.stable\n' > android/.build_version
           unzip -oq "$TEMPLATE/android_source.zip" -d android/build
 
+          cat >> android/build/build.gradle <<'GRADLE'
+
+          // Remove Godot import metadata before Android resource merging.
+          tasks.configureEach { task ->
+              if (task.name == "mergeDebugResources" ||
+                  task.name == "mergeReleaseResources") {
+                  task.doFirst {
+                      def resDir = file("$projectDir/res")
+                      if (resDir.exists()) {
+                          fileTree(resDir).matching {
+                              include "**/*.import"
+                          }.files.each { f ->
+                              println "Removing invalid Android resource: ${f}"
+                              f.delete()
+                          }
+                      }
+                  }
+              }
+          }
+          GRADLE
+
           touch android/build/gradle.properties
 
           cat >> android/build/gradle.properties <<'EOF'
