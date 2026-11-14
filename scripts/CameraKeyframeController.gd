@@ -21,8 +21,11 @@ func reset_view() -> void:
     update_orbit()
 
 func orbit_drag(relative: Vector2, sensitivity: float = 0.007) -> void:
-    yaw -= relative.x * sensitivity
-    pitch = clampf(pitch + relative.y * sensitivity, -1.35, 1.35)
+    # Reduce orbit speed as the camera approaches the face/model for precise work.
+    var distance_factor := clampf(distance / 7.5, 0.14, 1.0)
+    var effective_sensitivity := sensitivity * distance_factor
+    yaw -= relative.x * effective_sensitivity
+    pitch = clampf(pitch + relative.y * effective_sensitivity, -1.35, 1.35)
     update_orbit()
 
 func pan_drag(relative: Vector2, sensitivity: float = 0.006) -> void:

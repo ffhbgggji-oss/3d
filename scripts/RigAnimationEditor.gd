@@ -236,6 +236,15 @@ func _begin_pointer(pointer_id: int, position: Vector2) -> void:
         selected_bone = -1
         pointer_mode = "camera"
         return
+    # If a bone is already selected, allow tapping a distinct XYZ handle
+    # to lock the next drag to that axis only.
+    var tapped_axis := bone_overlay.pick_axis(position) if bone_overlay != null and selected_bone >= 0 and tool_mode in ["move", "rotate", "scale"] else ""
+    if not tapped_axis.is_empty():
+        bone_axis_mode = tapped_axis
+        pointer_mode = tool_mode
+        mobile_ui.set_status("Ось %s — движение только по этой оси" % tapped_axis)
+        _update_bone_overlay()
+        return
     selected_bone = bones.pick_bone(_active_camera(), position, 80.0)
     pointer_mode = tool_mode if selected_bone >= 0 else "camera"
     if selected_bone >= 0:

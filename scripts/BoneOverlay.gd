@@ -30,6 +30,32 @@ func configure(skeleton: Skeleton3D, camera: Camera3D, selected: int, mode: Stri
     bottom_reserved = safe_bottom
     queue_redraw()
 
+func pick_axis(screen_position: Vector2) -> String:
+    if selected_bone < 0 or not is_instance_valid(target_skeleton) or not is_instance_valid(target_camera):
+        return ""
+    var world := target_skeleton.global_transform * target_skeleton.get_bone_global_pose(selected_bone).origin
+    if target_camera.is_position_behind(world):
+        return ""
+    var c := target_camera.unproject_position(world)
+    var handles := {
+        "X": [c, c + Vector2(78.0, 0.0)],
+        "Y": [c, c + Vector2(0.0, -78.0)],
+        "Z": [c, c + Vector2(-58.0, 58.0)]
+    }
+    var best_axis := ""
+    var best_distance := 22.0
+    for axis_name in ["X", "Y", "Z"]:
+        var segment: Array = handles[axis_name]
+        var a: Vector2 = segment[0]
+        var b: Vector2 = segment[1]
+        var ab := b - a
+        var t := clampf((screen_position - a).dot(ab) / maxf(ab.length_squared(), 0.001), 0.0, 1.0)
+        var d := screen_position.distance_to(a + ab * t)
+        if d < best_distance:
+            best_distance = d
+            best_axis = axis_name
+    return best_axis
+
 func _draw() -> void:
     if not overlay_enabled or not is_instance_valid(target_skeleton) or not is_instance_valid(target_camera):
         return
@@ -67,20 +93,20 @@ func _draw_transform_gizmo(c: Vector2) -> void:
         draw_arc(c, 29.0, PI * 0.85, PI * 1.85, 48, Z_COLOR, 4.0, true)
         draw_circle(c, 5.0, SELECTED_COLOR)
     elif tool_mode == "move":
-        _draw_axis(c, c + Vector2(68, 0), X_COLOR)
-        _draw_axis(c, c + Vector2(0, -68), Y_COLOR)
-        _draw_axis(c, c + Vector2(-48, 48), Z_COLOR)
+        _draw_axis(c, c + Vector2(78, 0), X_COLOR)
+        _draw_axis(c, c + Vector2(0, -78), Y_COLOR)
+        _draw_axis(c, c + Vector2(-58, 58), Z_COLOR)
     elif tool_mode == "scale":
-        _draw_scale_axis(c, c + Vector2(68, 0), X_COLOR)
-        _draw_scale_axis(c, c + Vector2(0, -68), Y_COLOR)
-        _draw_scale_axis(c, c + Vector2(-48, 48), Z_COLOR)
+        _draw_scale_axis(c, c + Vector2(78, 0), X_COLOR)
+        _draw_scale_axis(c, c + Vector2(0, -78), Y_COLOR)
+        _draw_scale_axis(c, c + Vector2(-58, 58), Z_COLOR)
         draw_circle(c, 6.0, SELECTED_COLOR)
 
 func _draw_axis(a: Vector2, b: Vector2, color: Color) -> void:
-    draw_line(a, b, color, 5.0, true)
+    draw_line(a, b, color, 7.0, true)
     var d := (b - a).normalized()
-    var side := Vector2(-d.y, d.x) * 9.0
-    draw_colored_polygon(PackedVector2Array([b, b - d * 17.0 + side, b - d * 17.0 - side]), color)
+    var side := Vector2(-d.y, d.x) * 11.0
+    draw_colored_polygon(PackedVector2Array([b, b - d * 20.0 + side, b - d * 20.0 - side]), color)
 
 func _draw_scale_axis(a: Vector2, b: Vector2, color: Color) -> void:
     draw_line(a, b, color, 4.0, true)

@@ -110,17 +110,20 @@ func _parent_global_basis(index: int) -> Basis:
 func move_bone_axis_from_drag(index: int, relative: Vector2, camera: Camera3D, axis_mode: String, units_per_pixel: float = 0.006) -> bool:
     if not _valid_bone(index) or not is_instance_valid(camera):
         return false
-    var axis := _axis_vector(axis_mode)
+    var axis_local := _axis_vector(axis_mode)
     if axis_mode == "screen":
         return move_bone_from_drag(index, relative, camera, units_per_pixel)
+    # Axis handles are defined in skeleton-local space, then projected into
+    # screen space. This keeps forward/back consistent even if the model is rotated.
+    var axis_world := (skeleton.global_basis * axis_local).normalized()
     var bone_world := skeleton.global_transform * skeleton.get_bone_global_pose(index).origin
     var screen_start := camera.unproject_position(bone_world)
-    var screen_end := camera.unproject_position(bone_world + axis)
+    var screen_end := camera.unproject_position(bone_world + axis_world)
     var projected := screen_end - screen_start
     if projected.length() < 0.001:
         return false
     var pixels := relative.dot(projected.normalized())
-    var world_delta := axis * pixels * units_per_pixel
+    var world_delta := axis_world * pixels * units_per_pixel
     var local_delta := _parent_global_basis(index).inverse() * world_delta
     skeleton.set_bone_pose_position(index, skeleton.get_bone_pose_position(index) + local_delta)
     return true
@@ -161,7 +164,7 @@ func _axis_vector(axis_mode: String) -> Vector3:
     match axis_mode:
         "X": return Vector3.RIGHT
         "Y": return Vector3.UP
-        "Z": return Vector3.BACK
+        "Z": return Vector3.FORWARD
         _: return Vector3.ZERO
 
 
