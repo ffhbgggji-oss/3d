@@ -1,34 +1,73 @@
 extends Control
 class_name BoneOverlay
 
-## Screen-space skeleton and transform gizmo overlay. Input is handled by RigAnimationEditor.
+## Screen-space skeleton and touch-friendly transform gizmo.
 var target_skeleton: Skeleton3D
 var target_camera: Camera3D
 var selected_bone: int = -1
 var tool_mode: String = "rotate"
+var selected_axis: String = "screen"
 var overlay_enabled: bool = true
 var top_reserved: float = 224.0
 var bottom_reserved: float = 160.0
 
 const BONE_COLOR := Color(0.78, 0.80, 0.84, 0.88)
 const SELECTED_COLOR := Color(1.0, 0.55, 0.12, 1.0)
-const X_COLOR := Color(0.90, 0.18, 0.22, 1.0)
-const Y_COLOR := Color(0.18, 0.82, 0.22, 1.0)
-const Z_COLOR := Color(0.12, 0.36, 0.96, 1.0)
+const X_COLOR := Color(0.96, 0.20, 0.24, 1.0)
+const Y_COLOR := Color(0.18, 0.88, 0.30, 1.0)
+const Z_COLOR := Color(0.18, 0.48, 1.0, 1.0)
+const HANDLE_HIT_RADIUS := 42.0
+const HANDLE_LENGTH_PX := 118.0
+const HANDLE_START_PX := 23.0
 
 func _ready() -> void:
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-func configure(skeleton: Skeleton3D, camera: Camera3D, selected: int, mode: String, enabled: bool = true, safe_top: float = 224.0, safe_bottom: float = 160.0) -> void:
+func configure(skeleton: Skeleton3D, camera: Camera3D, selected: int, mode: String, enabled: bool = true, safe_top: float = 224.0, safe_bottom: float = 160.0, axis: String = "screen") -> void:
     target_skeleton = skeleton
     target_camera = camera
     selected_bone = selected
     tool_mode = mode
+    selected_axis = axis
     overlay_enabled = enabled
     top_reserved = safe_top
     bottom_reserved = safe_bottom
     queue_redraw()
+
+func _axis_color(axis: String) -> Color:
+    match axis:
+        "X": return X_COLOR
+        "Y": return Y_COLOR
+        "Z": return Z_COLOR
+    return Color.WHITE
+
+func _axis_world(axis: String) -> Vector3:
+    var local_axis := Vector3.RIGHT
+    match axis:
+        "X": local_axis = Vector3.RIGHT
+        "Y": local_axis = Vector3.UP
+        "Z": local_axis = Vector3.FORWARD
+    return (target_skeleton.global_basis.orthonormalized() * local_axis).normalized()
+
+func _handle_points(axis: String, center: Vector2) -> PackedVector2Array:
+    var world := target_skeleton.global_transform * target_skeleton.get_bone_global_pose(selected_bone).origin
+    var direction := _axis_world(axis)
+    var depth := maxf(0.1, target_camera.global_position.distance_to(world))
+    var viewport_height := maxf(1.0, get_viewport_rect().size.y)
+    var world_per_pixel: float
+    if target_camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+        world_per_pixel = target_camera.size / viewport_height
+    else:
+        world_per_pixel = 2.0 * depth * tan(deg_to_rad(target_camera.fov) * 0.5) / viewport_height
+    var world_length := world_per_pixel * HANDLE_LENGTH_PX
+    var endpoint_world := world + direction * world_length
+    var endpoint := target_camera.unproject_position(endpoint_world)
+    var projected := endpoint - center
+    if projected.length() < 0.001:
+        return PackedVector2Array([center, center])
+    var screen_dir := projected.normalized()
+    return PackedVector2Array([center + screen_dir * HANDLE_START_PX, center + screen_dir * HANDLE_LENGTH_PX])
 
 func pick_axis(screen_position: Vector2) -> String:
     if selected_bone < 0 or not is_instance_valid(target_skeleton) or not is_instance_valid(target_camera):
@@ -36,23 +75,19 @@ func pick_axis(screen_position: Vector2) -> String:
     var world := target_skeleton.global_transform * target_skeleton.get_bone_global_pose(selected_bone).origin
     if target_camera.is_position_behind(world):
         return ""
-    var c := target_camera.unproject_position(world)
-    var handles := {
-        "X": [c, c + Vector2(78.0, 0.0)],
-        "Y": [c, c + Vector2(0.0, -78.0)],
-        "Z": [c, c + Vector2(-58.0, 58.0)]
-    }
+    var center := target_camera.unproject_position(world)
     var best_axis := ""
-    var best_distance := 22.0
+    var best_distance := HANDLE_HIT_RADIUS
     for axis_name in ["X", "Y", "Z"]:
-        var segment: Array = handles[axis_name]
-        var a: Vector2 = segment[0]
-        var b: Vector2 = segment[1]
+        var points := _handle_points(axis_name, center)
+        var a: Vector2 = points[0]
+        var b: Vector2 = points[1]
         var ab := b - a
         var t := clampf((screen_position - a).dot(ab) / maxf(ab.length_squared(), 0.001), 0.0, 1.0)
-        var d := screen_position.distance_to(a + ab * t)
-        if d < best_distance:
-            best_distance = d
+        var distance := screen_position.distance_to(a + ab * t)
+        # Prefer the nearest handle; the central joint is deliberately not a handle.
+        if distance < best_distance:
+            best_distance = distance
             best_axis = axis_name
     return best_axis
 
@@ -80,34 +115,35 @@ func _draw() -> void:
     for i in points.keys():
         var p: Vector2 = points[i]
         var color := SELECTED_COLOR if int(i) == selected_bone else BONE_COLOR
-        var radius := 6.5 if int(i) == selected_bone else 4.5
-        draw_circle(p, radius + 1.2, Color(0.12, 0.13, 0.15, 0.8))
+        var radius := 7.0 if int(i) == selected_bone else 4.5
+        draw_circle(p, radius + 1.5, Color(0.12, 0.13, 0.15, 0.9))
         draw_circle(p, radius, color)
     if selected_bone >= 0 and points.has(selected_bone):
         _draw_transform_gizmo(points[selected_bone])
 
 func _draw_transform_gizmo(c: Vector2) -> void:
-    if tool_mode == "rotate":
-        draw_arc(c, 43.0, 0.0, TAU, 64, X_COLOR, 4.0, true)
-        draw_arc(c, 36.0, PI * 0.15, PI * 1.15, 48, Y_COLOR, 4.0, true)
-        draw_arc(c, 29.0, PI * 0.85, PI * 1.85, 48, Z_COLOR, 4.0, true)
-        draw_circle(c, 5.0, SELECTED_COLOR)
-    elif tool_mode == "move":
-        _draw_axis(c, c + Vector2(78, 0), X_COLOR)
-        _draw_axis(c, c + Vector2(0, -78), Y_COLOR)
-        _draw_axis(c, c + Vector2(-58, 58), Z_COLOR)
-    elif tool_mode == "scale":
-        _draw_scale_axis(c, c + Vector2(78, 0), X_COLOR)
-        _draw_scale_axis(c, c + Vector2(0, -78), Y_COLOR)
-        _draw_scale_axis(c, c + Vector2(-58, 58), Z_COLOR)
-        draw_circle(c, 6.0, SELECTED_COLOR)
-
-func _draw_axis(a: Vector2, b: Vector2, color: Color) -> void:
-    draw_line(a, b, color, 7.0, true)
-    var d := (b - a).normalized()
-    var side := Vector2(-d.y, d.x) * 11.0
-    draw_colored_polygon(PackedVector2Array([b, b - d * 20.0 + side, b - d * 20.0 - side]), color)
-
-func _draw_scale_axis(a: Vector2, b: Vector2, color: Color) -> void:
-    draw_line(a, b, color, 4.0, true)
-    draw_rect(Rect2(b - Vector2(7, 7), Vector2(14, 14)), color, true)
+    if tool_mode == "move" or tool_mode == "scale":
+        for axis_name in ["X", "Y", "Z"]:
+            var points := _handle_points(axis_name, c)
+            var a: Vector2 = points[0]
+            var b: Vector2 = points[1]
+            var color := _axis_color(axis_name)
+            var active := selected_axis == axis_name
+            var width := 15.0 if active else 11.0
+            draw_line(a, b, Color(0.04, 0.05, 0.07, 0.92), width + 5.0, true)
+            draw_line(a, b, color, width, true)
+            if tool_mode == "move":
+                var d := (b - a).normalized()
+                var side := Vector2(-d.y, d.x) * (15.0 if active else 12.0)
+                draw_colored_polygon(PackedVector2Array([b, b - d * 25.0 + side, b - d * 25.0 - side]), color)
+            else:
+                draw_rect(Rect2(b - Vector2(10, 10), Vector2(20, 20)), color, true)
+            draw_circle(b, 17.0 if active else 13.0, Color(0.05, 0.06, 0.08, 0.95))
+            draw_circle(b, 12.0 if active else 9.0, color)
+            draw_string(ThemeDB.fallback_font, b + Vector2(15, -13), axis_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, color)
+        draw_circle(c, 9.0, SELECTED_COLOR)
+    elif tool_mode == "rotate":
+        draw_arc(c, 48.0, 0.0, TAU, 64, X_COLOR, 6.0, true)
+        draw_arc(c, 39.0, PI * 0.15, PI * 1.15, 48, Y_COLOR, 6.0, true)
+        draw_arc(c, 30.0, PI * 0.85, PI * 1.85, 48, Z_COLOR, 6.0, true)
+        draw_circle(c, 7.0, SELECTED_COLOR)

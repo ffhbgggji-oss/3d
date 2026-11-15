@@ -170,7 +170,7 @@ func _update_bone_overlay() -> void:
     if bone_overlay == null:
         return
     var active_cam := _active_camera()
-    bone_overlay.configure(skeleton, active_cam, selected_bone, tool_mode, bones_visible, mobile_ui.top_reserved, mobile_ui.bottom_reserved)
+    bone_overlay.configure(skeleton, active_cam, selected_bone, tool_mode, bones_visible, mobile_ui.top_reserved, mobile_ui.bottom_reserved, bone_axis_mode)
 
 func _input(event: InputEvent) -> void:
     if (mp4_exporting or (two_d_editor != null and two_d_editor.active)) or is_playing or mobile_ui == null:
