@@ -1,9 +1,11 @@
 name: Build CartoonStudio APK
 
-on:
+"on":
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: write
@@ -11,29 +13,34 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract CartoonStudio ZIP
+      - name: Extract uploaded CartoonStudio ZIP
         run: |
-          set -e
-          ARCHIVE="CartoonStudio-axis-camera-fixes.zip"
-
-          if [ ! -f "$ARCHIVE" ]; then
-            echo "ERROR: $ARCHIVE not found in repository root"
-            exit 1
+          ARCHIVE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          if [ -n "$ARCHIVE" ]; then
+            echo "Extracting $ARCHIVE..."
+            unzip -oq "$ARCHIVE" -d .
+            rm -f "$ARCHIVE"
+            test -f project.godot
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git reset -- .github/workflows/unzip.yml
+            if ! git diff --cached --quiet; then
+              git commit -m "Import CartoonStudio source [skip ci]"
+              git push origin "HEAD:${GITHUB_REF_NAME}"
+            fi
+          else
+            echo "Using project files already in repository."
+            test -f project.godot
           fi
 
-          unzip -oq "$ARCHIVE" -d .
-          rm "$ARCHIVE"
-
-          test -f project.godot
-          test -f export_presets.cfg
-
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,79 +52,85 @@ jobs:
           gradle-version: "8.2.1"
 
       - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
         run: |
-          set -e
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export ANDROID_SDK_ROOT=$ANDROID_HOME
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
-          test -n "$SDKMANAGER"
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" \
+          yes | sdkmanager --licenses
+          sdkmanager \
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0" \
+            "cmdline-tools;latest" \
             "ndk;23.2.8568313" \
             "cmake;3.10.2.4988404"
 
       - name: Install Godot 4.2.1
         run: |
-          set -e
           wget -q https://github.com/godotengine/godot/releases/download/4.2.1-stable/Godot_v4.2.1-stable_linux.x86_64.zip -O godot.zip
-          unzip -oq godot.zip -d godot-bin
-          sudo install -m 755 godot-bin/Godot_v4.2.1-stable_linux.x86_64 /usr/local/bin/godot
+          unzip -q godot.zip -d godot-bin
+          sudo install -m 0755 godot-bin/Godot_v4.2.1-stable_linux.x86_64 /usr/local/bin/godot
           godot --version
 
-      - name: Install Godot Export Templates
+      - name: Install Godot export templates
         run: |
-          set -e
           wget -q https://github.com/godotengine/godot/releases/download/4.2.1-stable/Godot_v4.2.1-stable_export_templates.tpz -O templates.tpz
           mkdir -p templates-extracted "$HOME/.local/share/godot/export_templates/4.2.1.stable"
-          unzip -oq templates.tpz -d templates-extracted
+          unzip -q templates.tpz -d templates-extracted
           cp -a templates-extracted/templates/. "$HOME/.local/share/godot/export_templates/4.2.1.stable/"
+          if [ -f templates-extracted/version.txt ]; then
+            cp templates-extracted/version.txt "$HOME/.local/share/godot/export_templates/4.2.1.stable/version.txt"
+          fi
           test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_source.zip"
+          test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_debug.apk"
+          test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_release.apk"
 
-      - name: Build Android File Picker
+      - name: Build Android SAF plugin AAR
         run: |
-          set -e
-          gradle --no-daemon --max-workers=2 -p android-plugin :GodotAndroidFilePicker:assembleRelease
-
+          cd android-plugin
+          gradle --no-daemon --max-workers=2 :GodotAndroidFilePicker:assembleRelease
+          cd ..
           mkdir -p addons/GodotAndroidFilePicker/bin/release
-
           cp android-plugin/GodotAndroidFilePicker/build/outputs/aar/GodotAndroidFilePicker-release.aar \
             addons/GodotAndroidFilePicker/bin/release/GodotAndroidFilePicker.aar
-
           test -s addons/GodotAndroidFilePicker/bin/release/GodotAndroidFilePicker.aar
 
-      - name: Prepare Android Template
+      - name: Validate and import Godot project
         run: |
-          set -e
-          TEMPLATE="$HOME/.local/share/godot/export_templates/4.2.1.stable"
+          test -f project.godot
+          test -f icon.png
+          test -f export_presets.cfg
+          godot --headless --editor --path . --quit
 
+      - name: Install Android Gradle template
+        run: |
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.2.1.stable"
           rm -rf android
           mkdir -p android/build
-
           printf '4.2.1.stable\n' > android/.build_version
-          unzip -oq "$TEMPLATE/android_source.zip" -d android/build
+          : > android/build/.gdignore
+          unzip -q -o "$TEMPLATE_DIR/android_source.zip" -d android/build
+          touch android/build/gradle.properties
+          printf '\norg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\norg.gradle.workers.max=2\norg.gradle.parallel=false\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n' >> android/build/gradle.properties
 
           cat >> android/build/build.gradle <<'GRADLE'
-
-          // Remove Godot import metadata before Android resource merging.
-          tasks.configureEach { task ->
-              if (task.name == "mergeDebugResources" ||
-                  task.name == "mergeReleaseResources") {
-                  task.doFirst {
-                      def resDir = file("$projectDir/res")
-                      if (resDir.exists()) {
-                          fileTree(resDir).matching {
-                              include "**/*.import"
-                          }.files.each { f ->
-                              println "Removing invalid Android resource: ${f}"
-                              f.delete()
+          gradle.projectsEvaluated {
+              rootProject.allprojects.each { p ->
+                  p.tasks.matching {
+                      it.name == "mergeDebugResources" || it.name == "mergeReleaseResources"
+                  }.all { mergeTask ->
+                      mergeTask.doFirst {
+                          [rootProject.file("res"), p.file("res")].unique().each { resDir ->
+                              if (resDir.exists()) {
+                                  fileTree(resDir).matching {
+                                      include "**/*.import"
+                                  }.files.each { sidecar ->
+                                      println "Removing invalid Godot resource sidecar: ${sidecar}"
+                                      sidecar.delete()
+                                  }
+                              }
                           }
                       }
                   }
@@ -125,82 +138,47 @@ jobs:
           }
           GRADLE
 
-          touch android/build/gradle.properties
-
-          cat >> android/build/gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
-          org.gradle.workers.max=2
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
-
-          find android/build/res -type f -name '*.import' -delete 2>/dev/null || true
-
-      - name: Create Debug Keystore
+      - name: Generate debug signing key
         run: |
-          keytool -genkeypair -noprompt \
+          keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/debug.keystore" \
             -storepass android \
             -alias androiddebugkey \
             -keypass android \
             -keyalg RSA \
             -validity 9999 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-      - name: Configure Signing
-        env:
-          DEBUG_KEYSTORE: ${{ runner.temp }}/debug.keystore
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import os, re
-
-          p = Path("export_presets.cfg")
-          s = p.read_text()
-
-          marker = "[preset.0.options]"
-          if marker not in s:
-              raise SystemExit("Android preset options not found")
-
-          head, tail = s.split(marker, 1)
-
-          values = {
-              "keystore/debug": os.environ["DEBUG_KEYSTORE"],
-              "keystore/debug_user": "androiddebugkey",
-              "keystore/debug_password": "android",
-          }
-
-          for key, value in values.items():
-              line = f'{key}="{value}"'
-              pattern = rf"(?m)^{re.escape(key)}=.*$"
-
-              if re.search(pattern, tail):
-                  tail = re.sub(pattern, lambda _: line, tail, count=1)
-              else:
-                  tail = tail.rstrip() + "\n" + line + "\n"
-
-          p.write_text(head + marker + tail)
-          PY
-
-      - name: Import Godot Project
-        run: |
-          set -e
-          godot --headless --editor --path . --quit
-          find android/build/res -type f -name '*.import' -delete 2>/dev/null || true
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -deststoretype pkcs12
 
       - name: Export APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
-          set -e
           mkdir -p build
-
-          godot --headless --path . \
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path("export_presets.cfg")
+          text = path.read_text()
+          values = {
+              'keystore/debug=""': f'keystore/debug="{os.environ["RUNNER_TEMP"]}/debug.keystore"',
+              'keystore/debug_user=""': 'keystore/debug_user="androiddebugkey"',
+              'keystore/debug_password=""': 'keystore/debug_password="android"',
+          }
+          for old, new in values.items():
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          godot --headless --path . --verbose \
             --export-debug "Android" \
             build/CartoonStudio-debug.apk
-
           test -s build/CartoonStudio-debug.apk
-          unzip -t build/CartoonStudio-debug.apk
+          unzip -t build/CartoonStudio-debug.apk >/dev/null
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose build/CartoonStudio-debug.apk
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: CartoonStudio-APK
