@@ -1,20 +1,18 @@
-name: Unzip CartoonStudio
+name: CartoonStudio Unzip and Build APK
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  unzip:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Extract project ZIP
         run: |
@@ -28,16 +26,83 @@ jobs:
           unzip -o "$ZIP" -d .
           rm "$ZIP"
 
-      - name: Commit extracted files
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          sdkmanager "platforms;android-34"
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "ndk;23.2.8568313"
 
-          git add -A
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Extract CartoonStudio updated project"
-            git push
-          fi
+      - name: Build Android File Picker plugin
+        run: |
+          cd android-plugin
+          gradle assembleRelease
+
+          mkdir -p ../addons/GodotAndroidFilePicker/bin/release
+
+          find . -name "*.aar" -exec cp {} ../addons/GodotAndroidFilePicker/bin/release/ \;
+
+      - name: Download Godot 4.2.1
+        run: |
+          wget https://github.com/godotengine/godot/releases/download/4.2.1-stable/Godot_v4.2.1-stable_linux.x86_64.zip
+          unzip Godot_v4.2.1-stable_linux.x86_64.zip
+
+          chmod +x Godot_v4.2.1-stable_linux.x86_64
+          sudo mv Godot_v4.2.1-stable_linux.x86_64 /usr/local/bin/godot
+
+      - name: Install Godot export templates
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/4.2.1.stable
+
+          wget https://github.com/godotengine/godot/releases/download/4.2.1-stable/Godot_v4.2.1-stable_export_templates.tpz
+
+          unzip Godot_v4.2.1-stable_export_templates.tpz -d templates
+
+          cp templates/templates/* ~/.local/share/godot/export_templates/4.2.1.stable/
+
+      - name: Import project
+        run: |
+          godot --headless --editor --path . --import
+
+      - name: Prepare signing key
+        run: |
+          mkdir -p build
+
+          keytool -genkeypair \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -keystore build/debug.keystore \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Configure export preset
+        run: |
+          sed -i 's|keystore/debug=""|keystore/debug="build/debug.keystore"|' export_presets.cfg
+          sed -i 's|keystore/debug_user=""|keystore/debug_user="androiddebugkey"|' export_presets.cfg
+          sed -i 's|keystore/debug_password=""|keystore/debug_password="android"|' export_presets.cfg
+
+      - name: Export APK
+        run: |
+          godot --headless --path . --export-debug "Android" build/CartoonStudio.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CartoonStudio-APK
+          path: build/CartoonStudio.apk
+          if-no-files-found: error
