@@ -16,9 +16,9 @@ const SELECTED_COLOR := Color(1.0, 0.55, 0.12, 1.0)
 const X_COLOR := Color(0.96, 0.20, 0.24, 1.0)
 const Y_COLOR := Color(0.18, 0.88, 0.30, 1.0)
 const Z_COLOR := Color(0.18, 0.48, 1.0, 1.0)
-const HANDLE_HIT_RADIUS := 42.0
-const HANDLE_LENGTH_PX := 118.0
-const HANDLE_START_PX := 23.0
+const HANDLE_HIT_RADIUS := 58.0
+const HANDLE_LENGTH_PX := 148.0
+const HANDLE_START_PX := 26.0
 
 func _ready() -> void:
     mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -129,21 +129,21 @@ func _draw_transform_gizmo(c: Vector2) -> void:
             var b: Vector2 = points[1]
             var color := _axis_color(axis_name)
             var active := selected_axis == axis_name
-            var width := 15.0 if active else 11.0
+            var width := 18.0 if active else 15.0
             draw_line(a, b, Color(0.04, 0.05, 0.07, 0.92), width + 5.0, true)
             draw_line(a, b, color, width, true)
             if tool_mode == "move":
                 var d := (b - a).normalized()
-                var side := Vector2(-d.y, d.x) * (15.0 if active else 12.0)
-                draw_colored_polygon(PackedVector2Array([b, b - d * 25.0 + side, b - d * 25.0 - side]), color)
+                var side := Vector2(-d.y, d.x) * (19.0 if active else 16.0)
+                draw_colored_polygon(PackedVector2Array([b, b - d * 32.0 + side, b - d * 32.0 - side]), color)
             else:
-                draw_rect(Rect2(b - Vector2(10, 10), Vector2(20, 20)), color, true)
-            draw_circle(b, 17.0 if active else 13.0, Color(0.05, 0.06, 0.08, 0.95))
-            draw_circle(b, 12.0 if active else 9.0, color)
-            draw_string(ThemeDB.fallback_font, b + Vector2(15, -13), axis_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, color)
+                draw_rect(Rect2(b - Vector2(14, 14), Vector2(28, 28)), color, true)
+            draw_circle(b, 21.0 if active else 18.0, Color(0.05, 0.06, 0.08, 0.95))
+            draw_circle(b, 15.0 if active else 12.0, color)
+            draw_string(ThemeDB.fallback_font, b + Vector2(20, -16), axis_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, color)
         draw_circle(c, 9.0, SELECTED_COLOR)
     elif tool_mode == "rotate":
-        draw_arc(c, 48.0, 0.0, TAU, 64, X_COLOR, 6.0, true)
-        draw_arc(c, 39.0, PI * 0.15, PI * 1.15, 48, Y_COLOR, 6.0, true)
-        draw_arc(c, 30.0, PI * 0.85, PI * 1.85, 48, Z_COLOR, 6.0, true)
+        draw_arc(c, 58.0, 0.0, TAU, 64, X_COLOR, 9.0, true)
+        draw_arc(c, 48.0, PI * 0.15, PI * 1.15, 48, Y_COLOR, 9.0, true)
+        draw_arc(c, 38.0, PI * 0.85, PI * 1.85, 48, Z_COLOR, 9.0, true)
         draw_circle(c, 7.0, SELECTED_COLOR)
