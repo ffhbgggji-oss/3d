@@ -19,24 +19,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract uploaded CartoonStudio ZIP
+      - name: Extract CartoonStudio source
         run: |
-          ARCHIVE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
-          if [ -n "$ARCHIVE" ]; then
-            echo "Extracting $ARCHIVE..."
+          ARCHIVE="CartoonStudio-axis-gizmo-touch-fixed-prisma-gizmo.zip"
+
+          if [ -f "$ARCHIVE" ]; then
             unzip -oq "$ARCHIVE" -d .
             rm -f "$ARCHIVE"
+
             test -f project.godot
+
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
             git add -A
             git reset -- .github/workflows/unzip.yml
+
             if ! git diff --cached --quiet; then
               git commit -m "Import CartoonStudio source [skip ci]"
               git push origin "HEAD:${GITHUB_REF_NAME}"
             fi
           else
-            echo "Using project files already in repository."
             test -f project.godot
           fi
 
@@ -85,9 +88,8 @@ jobs:
           fi
           test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_source.zip"
           test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_debug.apk"
-          test -s "$HOME/.local/share/godot/export_templates/4.2.1.stable/android_release.apk"
 
-      - name: Build Android SAF plugin AAR
+      - name: Build Android File Picker plugin
         run: |
           cd android-plugin
           gradle --no-daemon --max-workers=2 :GodotAndroidFilePicker:assembleRelease
@@ -97,22 +99,26 @@ jobs:
             addons/GodotAndroidFilePicker/bin/release/GodotAndroidFilePicker.aar
           test -s addons/GodotAndroidFilePicker/bin/release/GodotAndroidFilePicker.aar
 
-      - name: Validate and import Godot project
+      - name: Validate Godot project
         run: |
           test -f project.godot
           test -f icon.png
           test -f export_presets.cfg
           godot --headless --editor --path . --quit
 
-      - name: Install Android Gradle template
+      - name: Install Android template
         run: |
           TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.2.1.stable"
+
           rm -rf android
           mkdir -p android/build
           printf '4.2.1.stable\n' > android/.build_version
           : > android/build/.gdignore
+
           unzip -q -o "$TEMPLATE_DIR/android_source.zip" -d android/build
+
           touch android/build/gradle.properties
+
           printf '\norg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\norg.gradle.workers.max=2\norg.gradle.parallel=false\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n' >> android/build/gradle.properties
 
           cat >> android/build/build.gradle <<'GRADLE'
@@ -120,15 +126,15 @@ jobs:
               rootProject.allprojects.each { p ->
                   p.tasks.matching {
                       it.name == "mergeDebugResources" || it.name == "mergeReleaseResources"
-                  }.all { mergeTask ->
-                      mergeTask.doFirst {
+                  }.all { task ->
+                      task.doFirst {
                           [rootProject.file("res"), p.file("res")].unique().each { resDir ->
                               if (resDir.exists()) {
                                   fileTree(resDir).matching {
                                       include "**/*.import"
-                                  }.files.each { sidecar ->
-                                      println "Removing invalid Godot resource sidecar: ${sidecar}"
-                                      sidecar.delete()
+                                  }.files.each { f ->
+                                      println "Removing invalid resource sidecar: ${f}"
+                                      f.delete()
                                   }
                               }
                           }
@@ -138,7 +144,7 @@ jobs:
           }
           GRADLE
 
-      - name: Generate debug signing key
+      - name: Generate debug key
         run: |
           keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/debug.keystore" \
@@ -151,34 +157,42 @@ jobs:
             -deststoretype pkcs12
 
       - name: Export APK
-        env:
-          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/debug.keystore
-          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
-          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
           mkdir -p build
+
           python3 - <<'PY'
-          import os
           from pathlib import Path
-          path = Path("export_presets.cfg")
-          text = path.read_text()
-          values = {
-              'keystore/debug=""': f'keystore/debug="{os.environ["RUNNER_TEMP"]}/debug.keystore"',
-              'keystore/debug_user=""': 'keystore/debug_user="androiddebugkey"',
-              'keystore/debug_password=""': 'keystore/debug_password="android"',
-          }
-          for old, new in values.items():
-              text = text.replace(old, new)
-          path.write_text(text)
+          import os
+
+          p = Path("export_presets.cfg")
+          s = p.read_text()
+
+          s = s.replace(
+              'keystore/debug=""',
+              f'keystore/debug="{os.environ["RUNNER_TEMP"]}/debug.keystore"'
+          )
+          s = s.replace(
+              'keystore/debug_user=""',
+              'keystore/debug_user="androiddebugkey"'
+          )
+          s = s.replace(
+              'keystore/debug_password=""',
+              'keystore/debug_password="android"'
+          )
+
+          p.write_text(s)
           PY
+
           godot --headless --path . --verbose \
             --export-debug "Android" \
             build/CartoonStudio-debug.apk
+
           test -s build/CartoonStudio-debug.apk
           unzip -t build/CartoonStudio-debug.apk >/dev/null
+
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose build/CartoonStudio-debug.apk
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: CartoonStudio-APK
