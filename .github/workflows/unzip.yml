@@ -34,15 +34,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: ""
-          
+
       - name: Install Android SDK components
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" "ndk;23.2.8568313"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Android File Picker plugin
         run: |
@@ -51,15 +46,6 @@ jobs:
           gradle wrapper --gradle-version 8.2.1
 
           ./gradlew assembleRelease
-
-          mkdir -p ../addons/GodotAndroidFilePicker/bin/release
-
-          find . -name "*.aar" -exec cp {} ../addons/GodotAndroidFilePicker/bin/release/ \;
-
-      - name: Build Android File Picker plugin
-        run: |
-          cd android-plugin
-          gradle assembleRelease
 
           mkdir -p ../addons/GodotAndroidFilePicker/bin/release
 
